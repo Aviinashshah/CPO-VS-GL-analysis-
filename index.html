@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cost Analysis & GL Dump Pivot Table</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(-45deg, #1d4ed8, #2563eb, #3b82f6, #60a5fa, #c026d3, #d946ef, #f3e8ff);
+            background-size: 400% 400%;
+            animation: gradient-animation 15s ease infinite;
+        }
+
+        @keyframes gradient-animation {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+
+        /* Custom scrollbar for better appearance */
+        .custom-scroll::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: #e2e8f0;
+            border-radius: 10px;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 10px;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+        /* Prose styles for LLM output */
+        .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 { margin-top: 1.25em; margin-bottom: 0.5em; line-height: 1.2; font-weight: 600; }
+        .prose h1 { font-size: 1.875rem; }
+        .prose h2 { font-size: 1.5rem; }
+        .prose h3 { font-size: 1.25rem; }
+        .prose p { margin-top: 0; margin-bottom: 1em; }
+        .prose ul, .prose ol { margin-top: 1em; margin-bottom: 1em; padding-left: 1.75em; }
+        .prose li > ul, .prose li > ol { margin-top: 0.5em; margin-bottom: 0.5em; }
+        .prose li { margin-top: 0.25em; margin-bottom: 0.25em; }
+        .prose strong { font-weight: 600; }
+        .prose code { font-family: monospace; background-color: #f3f4f6; padding: 0.2em 0.4em; margin: 0; font-size: 85%; border-radius: 0.25rem; }
+        .prose pre { background-color: #1f2937; color: #f9fafb; padding: 1em; border-radius: 0.5rem; overflow-x: auto; }
+        .prose pre code { background-color: transparent; padding: 0; font-size: 100%; }
+        .prose blockquote { border-left: 0.25rem solid #d1d5db; padding-left: 1em; font-style: italic; color: #4b5563; margin-left: 0; margin-right: 0; }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-out forwards;
+        }
+
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #3b82f6;
+            animation: spin 1s ease infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .welcome-screen {
+            animation: fadeOut 1s ease-out 14s forwards;
+        }
+
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; visibility: hidden; }
+        }
+        
+        @keyframes progressBar {
+            from { width: 0%; }
+            to { width: 100%; }
+        }
+
+        .progress-bar {
+            animation: progressBar 15s linear forwards;
+        }
+
+        @keyframes row-in {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .table-row-animate {
+            animation: row-in 0.5s ease-out forwards;
+            opacity: 0; /* Start hidden */
+        }
+
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+        // Gemini API Key (leave empty, Canvas will provide it at runtime)
+        const API_KEY = "";
+
+        // --- DATA MAPPING CONFIGURATION ---
+        const columnRenamingMap = {
+            'FT Staff Room': 'Staff room rent', 'FT Non Rider Salary': 'FT salaries', 'PF ESIC': 'PF ESIC & LWF', 'NAPS': 'NAPS', 'Monthly PT Non Rider': 'Part timer non rider', 'F&F Cost': 'FnF cost', 'F&F PF +ESIC': 'PF ESIC & LWF', 'Vendor Payment': 'Vendor Payment', 'FT Rider Salary': 'FT salaries', 'PF+ESIC': 'PF ESIC & LWF', 'Monthly PT Rider': 'Part timer', 'Weekly Freelancer': 'Freelancer', 'Outsourced Delivery': 'Outsourced', 'Outsourced\u00A0Delivery': 'Outsourced', '18% GST on OS': 'Outsourced', 'OS': 'Outsourced', 'FT Comapny Bike Petrol': 'Petrol', 'DD Incentive All Rounder': 'DD incentive - All rounder, PT, Rider', 'DD Incentive Rider': 'DD incentive - All rounder, PT, Rider', 'ALLROUNDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'FT RIDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'PT NON RIDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'PT RIDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'Special Incentive': 'Special Incentive', 'Notice Pay Recovery': 'Notice Pay Recovery', 'Other Deduction Salary': 'Other Deduction Salary'
+        };
+        const glAccountRenamingMap = {
+            622010: 'Staff room rent', 600000: 'FT salaries', 601005: 'PF ESIC & LWF', 601010: 'PF ESIC & LWF', 601030: 'PF ESIC & LWF', 600035: 'NAPS', 600075: 'Part timer non rider', 600055: 'FnF cost', 600070: 'Freelancer', 611000: 'Outsourced', 600040: 'DD incentive - All rounder, PT, Rider', 600060: 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 600050: 'Notice Pay Recovery', 600080: 'Other Deduction Salary'
+        };
+
+        const processRawData = (rawData) => {
+            return rawData.map(row => {
+                const newRow = {};
+                for (const originalKey in row) {
+                    if (row.hasOwnProperty(originalKey)) {
+                        const newKey = columnRenamingMap[originalKey.trim()] || originalKey.trim();
+                        if (newRow.hasOwnProperty(newKey) && typeof row[originalKey] === 'number') {
+                            newRow[newKey] += row[originalKey];
+                        } else {
+                            newRow[newKey] = row[originalKey];
+                        }
+                    }
+                }
+                return newRow;
+            });
+        };
+        
+        // --- UI COMPONENTS ---
+        const Icon = ({ name, className }) => {
+            React.useEffect(() => {
+                feather.replace();
+            }, [name, className]);
+            return <i data-feather={name} className={className}></i>;
+        };
+        
+        const MultiSelectCheckboxes = ({ options, selectedValues, onValueChange, searchTerm, onSearchChange, label }) => {
+            const filteredOptions = options.filter(option =>
+                String(option).toLowerCase().includes(searchTerm.toLowerCase())
+            );
+            
+            const handleSelectAll = () => {
+                if (selectedValues.length === options.length) {
+                    onValueChange([]); // Deselect all
+                } else {
+                    onValueChange(options); // Select all
+                }
+            };
+
+            return (
+                <div className="w-full">
+                    <div className="flex justify-between items-center mb-1">
+                         <label className="block text-sm font-medium text-gray-500">{label}</label>
+                         <button onClick={handleSelectAll} className="text-xs font-semibold text-blue-600 hover:text-blue-800">
+                             {selectedValues.length === options.length ? 'Deselect All' : 'Select All'}
+                         </button>
+                    </div>
+                    <input
+                        type="text"
+                        placeholder={`Search ${label}...`}
+                        value={searchTerm}
+                        onChange={onSearchChange}
+                        className="w-full p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow"
+                    />
+                    <div className="mt-2 border border-gray-200 rounded-lg p-3 max-h-48 overflow-y-auto bg-white custom-scroll">
+                        {filteredOptions.length > 0 ? (
+                            filteredOptions.map(option => (
+                                <div key={option} className="flex items-center mb-2">
+                                    <input
+                                        type="checkbox"
+                                        id={`checkbox-${label.replace(/\s/g, '')}-${option}`}
+                                        value={option}
+                                        checked={selectedValues.includes(option)}
+                                        onChange={(e) => {
+                                            const value = e.target.value;
+                                            if (e.target.checked) {
+                                                onValueChange([...selectedValues, value]);
+                                            } else {
+                                                onValueChange(selectedValues.filter(v => v !== value));
+                                            }
+                                        }}
+                                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded cursor-pointer"
+                                    />
+                                    <label htmlFor={`checkbox-${label.replace(/\s/g, '')}-${option}`} className="ml-3 text-sm text-gray-700 cursor-pointer">
+                                        {option}
+                                    </label>
+                                </div>
+                            ))
+                        ) : (
+                            <p className="text-sm text-gray-500 text-center py-2">No results found.</p>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const CollapsibleSection = ({ title, children, isOpen, toggleOpen, badgeCount, icon }) => (
+            <div className="bg-white/70 backdrop-blur-sm border border-gray-200/50 rounded-xl shadow-lg transition-all duration-300 mb-6">
+                <button
+                    className="w-full text-left p-4 flex justify-between items-center hover:bg-gray-50/50 rounded-t-xl focus:outline-none focus:ring-2 focus:ring-blue-400"
+                    onClick={toggleOpen}
+                >
+                    <div className="flex items-center">
+                        {icon && <Icon name={icon} className="mr-3 text-blue-600"/>}
+                        <h3 className="text-lg font-semibold text-gray-800">{title}</h3>
+                        {badgeCount > 0 && <span className="ml-3 bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded-full">{badgeCount} Rows</span>}
+                    </div>
+                    <Icon name={isOpen ? 'chevron-up' : 'chevron-down'} className="text-gray-500 transition-transform duration-300" />
+                </button>
+                {isOpen && (
+                    <div className="p-5 border-t border-gray-200/50 fade-in">
+                        {children}
+                    </div>
+                )}
+            </div>
+        );
+
+        const LoadingOverlay = ({ message }) => (
+             <div className="fixed inset-0 bg-white bg-opacity-75 flex flex-col items-center justify-center z-50 backdrop-blur-sm">
+                <div className="spinner"></div>
+                <p className="mt-4 text-lg font-semibold text-gray-700">{message}</p>
+            </div>
+        );
+        
+        const WelcomePage = () => {
+            return (
+                <div className="fixed inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-blue-500 to-purple-600 text-white welcome-screen z-50">
+                    <div className="text-center">
+                        <div className="fade-in" style={{animationDelay: '0.5s'}}>
+                            <Icon name="activity" className="w-24 h-24 mx-auto text-white/80"/>
+                        </div>
+                        <h1 className="text-5xl md:text-7xl font-extrabold mt-6 fade-in" style={{animationDelay: '1s'}}>
+                           Financial Analysis Suite
+                        </h1>
+                        <p className="text-xl md:text-2xl mt-4 text-white/80 fade-in" style={{animationDelay: '1.5s'}}>
+                            Your data, simplified and reconciled.
+                        </p>
+                         <div className="w-1/2 mx-auto mt-8 bg-white/20 rounded-full h-2.5">
+                            <div className="bg-white h-2.5 rounded-full progress-bar"></div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- MAIN APP COMPONENT ---
+        const App = () => {
+            const { useState, useEffect, useMemo } = React;
+
+            const [showWelcome, setShowWelcome] = useState(true);
+            const [currentPage, setCurrentPage] = useState('costAnalysis');
+            const [fixedCostData, setFixedCostData] = useState([]);
+            const [variableCostData, setVariableCostData] = useState([]);
+            const [mergedData, setMergedData] = useState([]);
+            const [columns, setColumns] = useState([]);
+            const [pivotRowFields, setPivotRowFields] = useState([]);
+            const [pivotValueFields, setPivotValueFields] = useState([]);
+            const [aggregationType, setAggregationType] = useState('sum');
+            const [mergeKey, setMergeKey] = useState('');
+            const [potentialMergeKeys, setPotentialMergeKeys] = useState([]);
+            const [rowFieldSearchTerm, setRowFieldSearchTerm] = useState('');
+            const [valueFieldSearchTerm, setValueFieldSearchTerm] = useState('');
+            const [isRawMergedDataOpen, setIsRawMergedDataOpen] = useState(false);
+            const [costRowFilterValues, setCostRowFilterValues] = useState([]);
+            const [selectedCostRowFilterValues, setSelectedCostRowFilterValues] = useState([]);
+            const [costRowFilterSearchTerm, setCostRowFilterSearchTerm] = useState('');
+            
+            const [glDumpData, setGlDumpData] = useState([]);
+            const [glDumpColumns, setGlDumpColumns] = useState([]);
+            const [glPivotRowFields, setGlPivotRowFields] = useState([]);
+            const [glPivotColumnFields, setGlPivotColumnFields] = useState([]);
+            const [glPivotValueFields, setGlPivotValueFields] = useState([]);
+            const [glAggregationType, setGlAggregationType] = useState('sum');
+            const [glRowFieldSearchTerm, setGlRowFieldSearchTerm] = useState('');
+            const [glColumnFieldSearchTerm, setGlColumnFieldSearchTerm] = useState('');
+            const [glValueFieldSearchTerm, setGlValueFieldSearchTerm] = useState('');
+            const [isRawGlDataOpen, setIsRawGlDataOpen] = useState(false);
+            const [glColumnFilterValues, setGlColumnFilterValues] = useState([]);
+            const [selectedGlColumnFilterValues, setSelectedGlColumnFilterValues] = useState([]);
+            const [glColumnFilterSearchTerm, setGlColumnFilterSearchTerm] = useState('');
+            const [reconciliationCostCenters, setReconciliationCostCenters] = useState([]);
+            const [selectedCostCenters, setSelectedCostCenters] = useState([]);
+            const [costCenterSearchTerm, setCostCenterSearchTerm] = useState('');
+            const [costCenterColumn, setCostCenterColumn] = useState(null);
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [loadingMessage, setLoadingMessage] = useState('');
+            const [costInsights, setCostInsights] = useState('');
+            const [loadingCostInsights, setLoadingCostInsights] = useState(false);
+            const [errorCostInsights, setErrorCostInsights] = useState('');
+            const [isCostInsightsOpen, setIsCostInsightsOpen] = useState(false);
+            const [fixedCostFileName, setFixedCostFileName] = useState('');
+            const [variableCostFileName, setVariableCostFileName] = useState('');
+            const [glDumpFileName, setGlDumpFileName] = useState('');
+
+            useEffect(() => {
+                const timer = setTimeout(() => {
+                    setShowWelcome(false);
+                }, 15000);
+                return () => clearTimeout(timer);
+            }, []);
+
+            useEffect(() => {
+                if (fixedCostData.length > 0 && variableCostData.length > 0) {
+                    const fixedCostHeaders = Object.keys(fixedCostData[0] || {});
+                    const variableCostHeaders = Object.keys(variableCostData[0] || {});
+                    const commonHeaders = fixedCostHeaders.filter(header => variableCostHeaders.includes(header));
+                    setPotentialMergeKeys(commonHeaders);
+                    if (commonHeaders.length > 0 && !mergeKey) setMergeKey(commonHeaders[0]);
+                    else if (commonHeaders.length === 0) setError('No common columns found to merge the two cost files. Please ensure they share at least one column with the same name (e.g., a "Location" or "ID" column).');
+                } else {
+                    setPotentialMergeKeys([]);
+                    setMergeKey('');
+                }
+            }, [fixedCostData, variableCostData]);
+
+            useEffect(() => {
+                if (fixedCostData.length > 0 && variableCostData.length > 0 && mergeKey) {
+                    setError('');
+                    
+                    const processedFixedData = processRawData(fixedCostData);
+                    const processedVariableData = processRawData(variableCostData);
+
+                    const mergedMap = new Map();
+                    
+                    processedFixedData.forEach(row => {
+                        const key = row[mergeKey];
+                        if (key != null) {
+                            mergedMap.set(key, { ...row });
+                        }
+                    });
+
+                    processedVariableData.forEach(row => {
+                        const key = row[mergeKey];
+                        if (key != null) {
+                            const existingRow = mergedMap.get(key);
+                            if (existingRow) {
+                                const newMergedRow = { ...existingRow };
+                                for (const colKey in row) {
+                                    if (colKey !== mergeKey && Object.prototype.hasOwnProperty.call(row, colKey)) {
+                                        const existingValue = newMergedRow[colKey] || 0;
+                                        const newValue = row[colKey] || 0;
+                                        if (typeof existingValue === 'number' && typeof newValue === 'number') {
+                                            newMergedRow[colKey] = existingValue + newValue;
+                                        } else {
+                                            newMergedRow[colKey] = row[colKey];
+                                        }
+                                    }
+                                }
+                                mergedMap.set(key, newMergedRow);
+                            } else {
+                                mergedMap.set(key, { ...row });
+                            }
+                        }
+                    });
+                    
+                    let tempMerged = Array.from(mergedMap.values());
+                    
+                    const columnsToRemove = new Set(['Total Fixed Cost', 'Actual Orders', 'Actual CPO', 'Budgeted Fixed Cost', 'Budgeted CPO', 'Difference', 'City', 'Notice Pay + Pending Recovery', 'Updated Date', 'Cost Delta', 'ss', 'Kitchen_Type', 'QuickiES Kitchen Budget', 'Duplicate Check', 'Budgeted Orders', 'Total Variable Cost', 'Actual Order', 'CPO', 'Budgeted Variable Cost', 'Budgeted Order', 'PT Rider Prorated (Excluding Hourly Cost)', 'Total FT Rider Cost', 'FT Rider Prorated Orders', 'FT CPO', 'Total All Rounder Cost', 'All Rounder Prorated Orders', 'All Rounder CPO', 'Total PT RIDER Cost', 'PT Rider Prorated Orders', 'PT Rider CPO', 'Total FL Prorated Order', 'FL Prorated Cost', 'FL CPO', 'Total 3PL Prorated Order', '3PL Prorated Cost', '3PL CPO']);
+                    tempMerged.forEach(row => { columnsToRemove.forEach(colName => { delete row[colName]; }); });
+                    
+                    setMergedData(tempMerged);
+                    
+                    const allCols = new Set();
+                    tempMerged.forEach(row => Object.keys(row).forEach(col => allCols.add(col)));
+                    setColumns(Array.from(allCols).sort());
+                } else {
+                    setMergedData([]);
+                    setColumns([]);
+                }
+            }, [fixedCostData, variableCostData, mergeKey]);
+
+            useEffect(() => {
+                if (glDumpData.length > 0) {
+                    const allCols = Array.from(new Set(glDumpData.flatMap(row => Object.keys(row)))).sort();
+                    setGlDumpColumns(allCols);
+                    if (glPivotRowFields.length === 0 && allCols.length > 0) { setGlPivotRowFields(allCols.includes('G/L Account') ? ['G/L Account'] : [allCols[0]]); }
+                    if (glPivotValueFields.length === 0 && allCols.length > 0) {
+                        const numericCols = allCols.filter(col => glDumpData.some(row => typeof row[col] === 'number' && !isNaN(row[col])));
+                        setGlPivotValueFields(numericCols.length > 0 ? [numericCols[0]] : []);
+                    }
+                }
+            }, [glDumpData]);
+
+            useEffect(() => {
+                if (glDumpData.length > 0 && glPivotColumnFields.length === 1) {
+                    const columnField = glPivotColumnFields[0];
+                    const uniqueValues = Array.from(new Set(glDumpData.map(row => row[columnField]).filter(val => val != null))).sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
+                    setGlColumnFilterValues(uniqueValues);
+                    setSelectedGlColumnFilterValues(uniqueValues);
+                } else {
+                    setGlColumnFilterValues([]);
+                    setSelectedGlColumnFilterValues([]);
+                }
+            }, [glDumpData, glPivotColumnFields]);
+
+            useEffect(() => {
+                if (mergedData.length > 0 && pivotRowFields.length === 1) {
+                    const rowField = pivotRowFields[0];
+                    const uniqueValues = Array.from(new Set(mergedData.map(row => row[rowField]).filter(val => val != null))).sort((a, b) => String(a).localeCompare(String(b), undefined, {numeric: true}));
+                    setCostRowFilterValues(uniqueValues);
+                    setSelectedCostRowFilterValues(uniqueValues);
+                } else {
+                    setCostRowFilterValues([]);
+                    setSelectedCostRowFilterValues([]);
+                }
+            }, [mergedData, pivotRowFields]);
+
+            useEffect(() => {
+                const findCostCenterColumn = () => {
+                    if (fixedCostData.length === 0 || glDumpData.length === 0) return null;
+                    const fixedHeaders = Object.keys(fixedCostData[0] || {});
+                    const glHeaders = Object.keys(glDumpData[0] || {});
+                    const commonHeaders = fixedHeaders.filter(h => glHeaders.includes(h) && h.toLowerCase().includes('cost') && h.toLowerCase().includes('center'));
+                    if(commonHeaders.length > 0) { return commonHeaders[0]; }
+                    return null;
+                };
+                const column = findCostCenterColumn();
+                setCostCenterColumn(column);
+                if (column) {
+                    const costFileCenters = fixedCostData.map(row => row[column]);
+                    const glFileCenters = glDumpData.map(row => row[column]);
+                    const uniqueCostCenters = Array.from(new Set([...costFileCenters, ...glFileCenters])).filter(cc => cc != null).sort();
+                    setReconciliationCostCenters(uniqueCostCenters);
+                    setSelectedCostCenters(uniqueCostCenters);
+                } else {
+                    setReconciliationCostCenters([]);
+                    setSelectedCostCenters([]);
+                }
+            }, [fixedCostData, glDumpData]);
+
+            const handleFileUpload = (event, type) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                setLoading(true);
+                setLoadingMessage(`Processing ${file.name}...`);
+                setError('');
+                
+                if (type === 'fixed') setFixedCostFileName(file.name);
+                else if (type === 'variable') setVariableCostFileName(file.name);
+                else if (type === 'glDump') setGlDumpFileName(file.name);
+
+                const processAndSetData = (data) => {
+                    const cleanedData = data.map(row => {
+                        const newRow = {};
+                        for (const key in row) {
+                            if (Object.prototype.hasOwnProperty.call(row, key)) {
+                                const value = row[key];
+                                if (typeof value === 'string') {
+                                    const cleanedString = value.trim().replace(/,/g, '');
+                                    newRow[key.trim()] = (cleanedString === '' || isNaN(parseFloat(cleanedString))) ? value : parseFloat(cleanedString);
+                                } else {
+                                    newRow[key.trim()] = value;
+                                }
+                            }
+                        }
+                        return newRow;
+                    });
+                    
+                    if (type === 'variable') {
+                        const processedVariableData = cleanedData.map(row => {
+                            const newRow = { ...row };
+                            const outsourcedDelivery = newRow['Outsourced Delivery'] || 0;
+                            const gst = newRow['18% GST on OS'] || 0;
+                            const os = newRow['OS'] || 0;
+                            
+                            newRow['Outsourced'] = (newRow['Outsourced'] || 0) + outsourcedDelivery + gst + os;
+                            
+                            delete newRow['Outsourced Delivery'];
+                            delete newRow['18% GST on OS'];
+                            delete newRow['OS'];
+                            
+                            return newRow;
+                        });
+                        setVariableCostData(processedVariableData);
+                    } else if (type === 'fixed') {
+                        setFixedCostData(cleanedData);
+                    } else if (type === 'glDump') {
+                        const processedGlData = cleanedData.map(row => {
+                            const newRow = { ...row };
+                            const glAccountKey = String(newRow['G/L Account']);
+                            const docHeaderText = String(newRow['Document Header Text'] || '').toUpperCase();
+                            const materialDescription = String(newRow['Material: Description'] || '').toUpperCase();
+                            const referenceText = String(newRow['Reference'] || '').toUpperCase();
+                            const textColumn = String(newRow['Text'] || '').toUpperCase();
+                            if (glAccountKey === '600060') {
+                                if (docHeaderText.includes('FT_SALARY')) { newRow['G/L Account'] = 'Monthly CDO incentive'; }
+                                else if (docHeaderText.includes('ADVANCE INCENTIV')) { newRow['G/L Account'] = 'Fuel - All Rounder, FT rider, PT rider, PT Non rider'; }
+                                else { newRow['G/L Account'] = 'Others'; }
+                            } 
+                            else if (glAccountKey === '611000') {
+                                if (materialDescription === 'OUTSOURCED DELIVERY COST' || !referenceText.includes('SPK-')) {
+                                    newRow['G/L Account'] = 'Outsourced';
+                                } else {
+                                    newRow['G/L Account'] = 'Petrol';
+                                }
+                            }
+                            else if (glAccountKey === '600075') {
+                                if (textColumn.includes('PT_RIDER SALARY')) { newRow['G/L Account'] = 'Part timer'; }
+                                else if (textColumn.includes('PT SALARY')) { newRow['G/L Account'] = 'Part timer non rider'; }
+                                else { newRow['G/L Account'] = 'Part Timer Salary Reversal'; }
+                            }
+                            else { if (glAccountRenamingMap.hasOwnProperty(glAccountKey)) { newRow['G/L Account'] = glAccountRenamingMap[glAccountKey]; } }
+                            return newRow;
+                        });
+                        setGlDumpData(processedGlData);
+                    }
+                    setLoading(false);
+                };
+
+                const fileExtension = file.name.split('.').pop().toLowerCase();
+
+                if (fileExtension === 'csv') {
+                    window.Papa.parse(file, {
+                        header: true, skipEmptyLines: true, dynamicTyping: false, 
+                        transformHeader: header => header.trim(),
+                        complete: (results) => {
+                            if (results.errors.length) { setError(`Error parsing CSV: ${results.errors[0].message}`); setLoading(false); } 
+                            else { processAndSetData(results.data); }
+                        },
+                        error: (err) => { setError(`Error parsing file: ${err.message}`); setLoading(false); }
+                    });
+                } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        try {
+                            const data = new Uint8Array(e.target.result);
+                            const workbook = XLSX.read(data, { type: 'array' });
+                            const sheetName = workbook.SheetNames[0];
+                            const worksheet = workbook.Sheets[sheetName];
+                            const jsonData = XLSX.utils.sheet_to_json(worksheet);
+                             processAndSetData(jsonData);
+                        } catch (err) {
+                            setError(`Error parsing Excel file: ${err.message}`);
+                            setLoading(false);
+                        }
+                    };
+                    reader.onerror = (err) => { setError('Error reading Excel file.'); setLoading(false); };
+                    reader.readAsArrayBuffer(file);
+                } else {
+                    setError('Unsupported file type. Please upload a CSV or Excel (.xlsx, .xls) file.');
+                    setLoading(false);
+                }
+            };
+             
+            const handleFileClear = (type) => {
+                if (type === 'fixed') {
+                    setFixedCostData([]);
+                    setFixedCostFileName('');
+                } else if (type === 'variable') {
+                    setVariableCostData([]);
+                    setVariableCostFileName('');
+                } else if (type === 'glDump') {
+                    setGlDumpData([]);
+                    setGlDumpFileName('');
+                }
+                const fileInput = document.getElementById(`${type}File`);
+                if(fileInput) fileInput.value = '';
+            };
+            
+            const aggregateData = (data, rowFields, columnFields, valueFields, aggregationType, isGlDump = false) => {
+                if (rowFields.length === 0 || valueFields.length === 0 || data.length === 0) { return { headers: [], rows: [], aggregatedMap: new Map(), grandTotalsMap: new Map(), originalRowKeys: new Map() }; }
+                const pivot = new Map();
+                const grandTotalsMap = new Map();
+                const uniqueColumnValues = new Set();
+                const originalRowKeys = new Map();
+                data.forEach(row => {
+                    const originalRowKeyParts = rowFields.map(field => String(row[field] ?? ''));
+                    const normalizedRowKey = originalRowKeyParts.map(part => part.trim().toLowerCase()).join(' | ');
+                    if (!originalRowKeys.has(normalizedRowKey)) { originalRowKeys.set(normalizedRowKey, originalRowKeyParts.join(' | ')); }
+                    const normalizedColumnKey = columnFields.length > 0 ? columnFields.map(field => String(row[field] ?? '').trim().toLowerCase()).join(' | ') : 'total';
+                    if (columnFields.length > 0) uniqueColumnValues.add(normalizedColumnKey);
+                    if (!pivot.has(normalizedRowKey)) pivot.set(normalizedRowKey, new Map());
+                    const rowMap = pivot.get(normalizedRowKey);
+                    if (!rowMap.has(normalizedColumnKey)) { const valueMap = {}; valueFields.forEach(field => { valueMap[field] = [] }); rowMap.set(normalizedColumnKey, valueMap); }
+                    const columnMap = rowMap.get(normalizedColumnKey);
+                    valueFields.forEach(valueField => {
+                        const value = row[valueField];
+                        if (typeof value === 'number' && !isNaN(value)) {
+                            columnMap[valueField].push(value);
+                            const totalKey = `${normalizedColumnKey}||${valueField}`;
+                            grandTotalsMap.set(totalKey, (grandTotalsMap.get(totalKey) || 0) + value);
+                        }
+                    });
+                });
+                const sortedColumnValues = columnFields.length > 0 ? Array.from(uniqueColumnValues).sort() : ['total'];
+                const headers = [...rowFields];
+                sortedColumnValues.forEach(colVal => {
+                    valueFields.forEach(valueField => {
+                        let headerText = `${colVal} - ${valueField}`;
+                        if (colVal === 'total') headerText = `${aggregationType} of ${valueField}`;
+                        if (isGlDump && valueField === 'Company Code Currency Value' && colVal !== 'total') headerText = `${aggregationType} Of ${colVal}`;
+                        headers.push(headerText);
+                    });
+                });
+                const rows = [];
+                const aggregatedMap = new Map();
+                const sortedRowKeys = Array.from(pivot.keys()).sort();
+                sortedRowKeys.forEach(normalizedRowKey => {
+                    const displayRowKey = originalRowKeys.get(normalizedRowKey) || normalizedRowKey;
+                    const rowData = [...displayRowKey.split(' | ')];
+                    sortedColumnValues.forEach(colVal => {
+                        valueFields.forEach(valueField => {
+                            const values = pivot.get(normalizedRowKey)?.get(colVal)?.[valueField] || [];
+                            let aggregatedValue = 0;
+                            if (values.length > 0) {
+                                switch (aggregationType) {
+                                    case 'sum': aggregatedValue = values.reduce((a, b) => a + b, 0); break;
+                                    case 'average': aggregatedValue = values.reduce((a, b) => a + b, 0) / values.length; break;
+                                    case 'count': aggregatedValue = values.length; break;
+                                }
+                            }
+                            rowData.push(aggregatedValue.toFixed(2));
+                            aggregatedMap.set(`${normalizedRowKey}||${colVal}||${valueField}`, aggregatedValue);
+                        });
+                    });
+                    rows.push(rowData);
+                });
+                const grandTotalRow = Array(rowFields.length).fill('');
+                if (grandTotalRow.length > 0) grandTotalRow[0] = 'Grand Total';
+                sortedColumnValues.forEach(colVal => {
+                    valueFields.forEach(valueField => {
+                        grandTotalRow.push((grandTotalsMap.get(`${colVal}||${valueField}`) || 0).toFixed(2));
+                    });
+                });
+                rows.push(grandTotalRow);
+                return { headers, rows, aggregatedMap, grandTotalsMap, originalRowKeys };
+            };
+            
+            const pivotTable = useMemo(() => {
+                let dataToAggregate = mergedData;
+                if (pivotRowFields.length === 1 && costRowFilterValues.length > 0 && selectedCostRowFilterValues.length < costRowFilterValues.length) {
+                    const filterField = pivotRowFields[0];
+                    const selectedSet = new Set(selectedCostRowFilterValues);
+                    dataToAggregate = mergedData.filter(row => selectedSet.has(row[filterField]));
+                }
+                return aggregateData(dataToAggregate, pivotRowFields, [], pivotValueFields, aggregationType)
+            }, [mergedData, pivotRowFields, pivotValueFields, aggregationType, costRowFilterValues, selectedCostRowFilterValues]);
+            
+            const glPivotTable = useMemo(() => {
+                let dataToAggregate = glDumpData;
+                if (glPivotColumnFields.length === 1 && glColumnFilterValues.length > 0 && selectedGlColumnFilterValues.length < glColumnFilterValues.length) {
+                    const filterField = glPivotColumnFields[0];
+                    const selectedSet = new Set(selectedGlColumnFilterValues);
+                    dataToAggregate = glDumpData.filter(row => selectedSet.has(row[filterField]));
+                }
+                return aggregateData(dataToAggregate, glPivotRowFields, glPivotColumnFields, glPivotValueFields, glAggregationType, true)
+            }, [glDumpData, glPivotRowFields, glPivotColumnFields, glPivotValueFields, glAggregationType, glColumnFilterValues, selectedGlColumnFilterValues]);
+            
+            const mergedViewTable = useMemo(() => {
+                if (pivotTable.rows.length === 0 || glPivotTable.rows.length === 0) { return { headers: [], rows: [], message: "Please generate pivot tables on both the Cost Analysis and GL Dump tabs." }; }
+                const costRowMap = new Map(pivotTable.rows.map(row => [row.slice(0, pivotRowFields.length).join(' | '), row.slice(pivotRowFields.length)]));
+                const glRowMap = new Map(glPivotTable.rows.map(row => [row.slice(0, glPivotRowFields.length).join(' | '), row.slice(glPivotRowFields.length)]));
+                const allKeys = new Set([...costRowMap.keys(), ...glRowMap.keys()]);
+                allKeys.delete('Grand Total'); 
+                const sortedKeys = Array.from(allKeys).sort();
+                if (costRowMap.has('Grand Total') || glRowMap.has('Grand Total')) { sortedKeys.push('Grand Total'); }
+                const headers = [ ...pivotRowFields, ...pivotTable.headers.slice(pivotRowFields.length).map(h => `Cost (${h})`), ...glPivotTable.headers.slice(glPivotRowFields.length).map(h => `GL (${h})`)];
+                const rows = sortedKeys.map(key => {
+                    const rowKeyParts = key.split(' | ');
+                    const costData = costRowMap.get(key) || Array(pivotTable.headers.length - pivotRowFields.length).fill('0.00');
+                    const glData = glRowMap.get(key) || Array(glPivotTable.headers.length - glPivotRowFields.length).fill('0.00');
+                    return [...rowKeyParts, ...costData, ...glData];
+                });
+                return { headers, rows, message: null };
+            }, [pivotTable, glPivotTable, pivotRowFields, glPivotRowFields]);
+
+            const reconciliationTable = useMemo(() => {
+                if (mergedData.length === 0 || glDumpData.length === 0) { return { headers: [], rows: [], message: "Please upload data on both the Cost Analysis and GL Dump tabs to perform reconciliation." }; }
+                let dataForRecon = mergedData;
+                let glDataForRecon = glDumpData;
+                if (costCenterColumn && reconciliationCostCenters.length > 0) {
+                    const selectedSet = new Set(selectedCostCenters);
+                    dataForRecon = mergedData.filter(row => selectedSet.has(row[costCenterColumn]));
+                    glDataForRecon = glDumpData.filter(row => selectedSet.has(row[costCenterColumn]));
+                }
+                const costTotals = new Map();
+                const costCategories = new Set(Object.values(columnRenamingMap));
+                dataForRecon.forEach(row => { for (const key in row) { if (costCategories.has(key) && typeof row[key] === 'number') { costTotals.set(key, (costTotals.get(key) || 0) + row[key]); } } });
+                const glTotals = new Map();
+                const currencyColumn = 'Company Code Currency Value';
+                const accountColumn = 'G/L Account';
+                glDataForRecon.forEach(row => { const accountName = row[accountColumn]; const amount = row[currencyColumn]; if (accountName && typeof amount === 'number') { glTotals.set(accountName, (glTotals.get(accountName) || 0) + amount); } });
+                const allKeys = new Set([...costTotals.keys(), ...glTotals.keys()]);
+                const sortedKeys = Array.from(allKeys).sort();
+                let totalCost = 0; let totalGl = 0;
+                const rows = sortedKeys.map(key => {
+                    const costAmount = costTotals.get(key) || 0;
+                    const glAmount = glTotals.get(key) || 0;
+                    const difference = costAmount - glAmount;
+                    totalCost += costAmount; totalGl += glAmount;
+                    return [ key, costAmount.toFixed(2), glAmount.toFixed(2), difference.toFixed(2) ];
+                });
+                rows.push([ 'Grand Total', totalCost.toFixed(2), totalGl.toFixed(2), (totalCost - totalGl).toFixed(2) ]);
+                const headers = ['Cost Category', 'Cost Analysis Amount', 'GL Dump Amount', 'Difference'];
+                return { headers, rows, message: null };
+            }, [mergedData, glDumpData, selectedCostCenters, costCenterColumn, reconciliationCostCenters]);
+
+
+            const formattedMergedData = useMemo(() => {
+                if (mergedData.length === 0) return { headers: [], rows: [] };
+                const headers = Object.keys(mergedData[0] || {});
+                const rows = mergedData.slice(0, 100).map(row => headers.map(header => row[header] ?? ''));
+                return { headers, rows };
+            }, [mergedData]);
+
+            const formattedGlData = useMemo(() => {
+                if (glDumpData.length === 0) return { headers: [], rows: [] };
+                const headers = Object.keys(glDumpData[0] || {});
+                const rows = glDumpData.slice(0, 100).map(row => headers.map(header => row[header] ?? ''));
+                return { headers, rows };
+            }, [glDumpData]);
+
+            const generateLlmContent = async (prompt) => {
+                const apiKey = API_KEY;
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+                const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+                const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!response.ok) { const errorData = await response.json(); throw new Error(`API Error: ${errorData.error?.message || response.statusText}`); }
+                const result = await response.json();
+                if (result.candidates?.[0]?.content?.parts?.[0]?.text) { return result.candidates[0].content.parts[0].text; }
+                throw new Error(result.promptFeedback?.blockReason ? `Blocked: ${result.promptFeedback.blockReason}` : "Invalid API response.");
+            };
+            
+            const fetchCostInsights = async () => {
+                if (pivotTable.rows.length === 0) { setErrorCostInsights("Please generate the Cost Analysis Pivot Table first."); return; }
+                setLoadingCostInsights(true); setErrorCostInsights(''); setCostInsights('');
+                try {
+                    const tableForLlm = { headers: pivotTable.headers, rows: pivotTable.rows.slice(0, 50) };
+                    const prompt = `You are a professional financial analyst AI. Analyze the following cost data pivot table and provide a concise, actionable report in markdown format. Focus on: 1. Executive Summary, 2. Top Cost Drivers (with % of total), 3. Notable Patterns/Outliers, 4. Potential Action Items, 5. Data Quality Check.\n\n**Cost Data:**\n${JSON.stringify(tableForLlm, null, 2)}`;
+                    const insights = await generateLlmContent(prompt);
+                    setCostInsights(insights);
+                    setIsCostInsightsOpen(true);
+                } catch (err) {
+                    setErrorCostInsights(`Failed to generate insights: ${err.message}`);
+                } finally {
+                    setLoadingCostInsights(false);
+                }
+            };
+
+            const exportDataToCsv = (headers, rows, filename) => {
+                 if (!headers || headers.length === 0 || !rows) { setError(`No data available to export for ${filename}.`); return; }
+                const csvContent = [ headers.join(','), ...rows.map(row => row.map(cell => `"${String(cell ?? '').replace(/"/g, '""')}"`).join(',')) ].join('\n');
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.setAttribute('download', filename);
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setError('');
+            };
+
+            const exportPivotDataToCsv = (tableData, filename) => { exportDataToCsv(tableData.headers, tableData.rows, filename); };
+            const exportRawDataToCsv = (data, filename) => { if (data.length === 0) { setError(`No raw data available to export for ${filename}.`); return; } const headers = Object.keys(data[0] || {}); const rows = data.map(row => headers.map(header => row[header])); exportDataToCsv(headers, rows, filename); };
+
+            const renderDataTable = (tableData, color, dataKey, totalRows) => {
+                let rowHeaderCount = 0;
+                if(dataKey.includes('cost-pivot')) rowHeaderCount = pivotRowFields.length;
+                else if (dataKey.includes('gl-pivot')) rowHeaderCount = glPivotRowFields.length;
+                else if (dataKey.includes('merged-view')) rowHeaderCount = pivotRowFields.length;
+                else if (dataKey.includes('reconciliation')) rowHeaderCount = 1;
+
+                return (
+                    <div className="overflow-x-auto rounded-lg shadow-md custom-scroll max-h-[70vh]">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className={`bg-gradient-to-br from-${color}-600 to-${color}-700 sticky top-0 z-10 shadow-md`}>
+                                <tr>{tableData.headers.map((header, index) => <th key={`${dataKey}-header-${index}`} className={`px-6 py-4 text-left text-xs font-bold text-white uppercase tracking-wider ${index < rowHeaderCount ? `bg-gradient-to-br from-${color}-700 to-${color}-800` : ''}`}>{header}</th>)}</tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-200">
+                                {tableData.rows.map((row, rowIndex) => (
+                                    <tr key={`${dataKey}-row-${rowIndex}`} className={`table-row-animate transition-colors duration-300 transform hover:scale-[1.01] hover:shadow-md ${String(row[0]).toLowerCase().includes('grand total') ? `bg-gradient-to-r from-${color}-200 to-${color}-100 font-extrabold text-${color}-900` : (rowIndex % 2 === 0 ? 'bg-white' : `bg-gray-50/70`)}`} style={{ animationDelay: `${Math.min(rowIndex * 0.05, 2)}s` }}>
+                                        {row.map((cell, cellIndex) => <td key={`${dataKey}-cell-${rowIndex}-${cellIndex}`} className={`px-6 py-4 whitespace-nowrap text-sm ${cellIndex < rowHeaderCount ? `font-semibold text-gray-900 sticky left-0 bg-gray-100/70 backdrop-blur-sm` : 'text-gray-700'} ${cellIndex === 3 && parseFloat(cell) !== 0 ? `bg-red-100 text-red-700 font-bold` : ''}`}>{String(cell)}</td>)}
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        {totalRows > 100 && <p className="text-center text-sm text-gray-500 mt-2 p-2 bg-gray-50">Displaying first 100 of {totalRows} rows. Export for full data.</p>}
+                    </div>
+                );
+            };
+
+            const PageButton = ({ page, currentPage, onClick, children, disabled }) => (
+                <button 
+                    onClick={() => onClick(page)} 
+                    disabled={disabled}
+                    className={`py-2 px-4 rounded-lg font-semibold transition-all duration-300 transform flex items-center gap-2 ${disabled ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : (currentPage === page ? 'bg-blue-600 text-white shadow-lg scale-105' : 'bg-white text-gray-600 hover:bg-blue-100 hover:text-blue-700 hover:shadow-md')}`}
+                >
+                    {children}
+                </button>
+            );
+            
+            const FileUploadCard = ({ title, onUpload, fileType, icon, fileName, onClear }) => (
+                 <div className="bg-white/70 backdrop-blur-sm p-6 rounded-xl shadow-md border border-gray-200/50 hover:shadow-lg transition-shadow duration-300">
+                    <div className="flex items-center text-blue-600 mb-3">
+                        <Icon name={icon} className="w-6 h-6"/>
+                        <label className="block font-semibold ml-2">{title}</label>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <label htmlFor={`${fileType}File`} className="relative cursor-pointer bg-blue-50 text-blue-700 font-semibold py-2 px-4 rounded-full hover:bg-blue-100 transition-colors duration-200">
+                            <span>Choose File</span>
+                            <input type="file" id={`${fileType}File`} accept=".csv, .xls, .xlsx" onChange={(e) => onUpload(e, fileType)} className="sr-only"/>
+                        </label>
+                        {fileName ? (
+                           <div className="flex items-center gap-2 bg-gray-100 p-2 rounded-md">
+                               <Icon name="file-text" className="w-4 h-4 text-gray-500" />
+                               <span className="text-sm text-gray-700 truncate max-w-xs">{fileName}</span>
+                               <button onClick={() => onClear(fileType)} className="text-gray-400 hover:text-red-500 flex-shrink-0">
+                                   <Icon name="x" className="w-4 h-4"/>
+                               </button>
+                           </div>
+                        ) : (
+                           <span className="text-sm text-gray-500">No file chosen</span>
+                        )}
+                    </div>
+                     <p className="text-xs text-gray-400 mt-2">Supported formats: .csv, .xls, .xlsx</p>
+                </div>
+            );
+            
+            if (showWelcome) {
+                return <WelcomePage />;
+            }
+            
+            const isAnalysisDisabled = fixedCostData.length === 0 || variableCostData.length === 0;
+            const isGlDisabled = glDumpData.length === 0;
+
+            return (
+                <div className="min-h-screen p-4 sm:p-6 lg:p-8">
+                    {loading && <LoadingOverlay message={loadingMessage} />}
+                    <div className="max-w-screen-2xl mx-auto bg-white/50 backdrop-blur-xl rounded-2xl shadow-2xl p-4 sm:p-8">
+                        <header className="text-center mb-8">
+                            <h1 className="text-4xl md:text-5xl font-extrabold text-gray-800 tracking-tight">Financial Analysis Suite</h1>
+                            <p className="text-lg text-gray-500 mt-2">Upload, Pivot, and Reconcile with AI-Powered Insights</p>
+                        </header>
+                        
+                        <nav className="flex justify-center flex-wrap gap-2 mb-10 p-2 bg-white/70 backdrop-blur-sm rounded-xl shadow-md border border-gray-200/50">
+                             <PageButton page="costAnalysis" currentPage={currentPage} onClick={setCurrentPage}><Icon name="bar-chart-2" className="w-5 h-5"/>Cost Analysis</PageButton>
+                             <PageButton page="glDumpAnalysis" currentPage={currentPage} onClick={setCurrentPage} disabled={isAnalysisDisabled}><Icon name="book" className="w-5 h-5"/>GL Dump</PageButton>
+                             <PageButton page="mergedView" currentPage={currentPage} onClick={setCurrentPage} disabled={isAnalysisDisabled || isGlDisabled}><Icon name="layers" className="w-5 h-5"/>Merged Pivot</PageButton>
+                             <PageButton page="reconciliation" currentPage={currentPage} onClick={setCurrentPage} disabled={isAnalysisDisabled || isGlDisabled}><Icon name="check-circle" className="w-5 h-5"/>Reconciliation</PageButton>
+                        </nav>
+                        
+                        {error && <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-r-lg shadow-md" role="alert"><strong className="font-bold">Error! </strong><span className="block sm:inline ml-1">{error}</span></div>}
+
+                        <main className="fade-in">
+                            {currentPage === 'costAnalysis' && <>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                                    <FileUploadCard title="Upload Fixed Cost CSV" onUpload={handleFileUpload} fileType="fixed" icon="upload-cloud" fileName={fixedCostFileName} onClear={handleFileClear} />
+                                    <FileUploadCard title="Upload Variable Cost CSV" onUpload={handleFileUpload} fileType="variable" icon="upload-cloud" fileName={variableCostFileName} onClear={handleFileClear} />
+                                </div>
+                                {isAnalysisDisabled && <div className="text-center p-8 bg-gray-100/50 rounded-xl border-2 border-dashed"><p className="text-lg font-medium text-gray-600">Please upload both a Fixed and Variable Cost file to begin analysis.</p></div>}
+                                {potentialMergeKeys.length > 0 && <div className="mb-8 p-6 bg-white/70 backdrop-blur-sm rounded-xl shadow-md border border-gray-200/50"><label htmlFor="mergeKeySelect" className="block font-semibold text-gray-700 mb-2">Select Merge Column:</label><select id="mergeKeySelect" value={mergeKey} onChange={(e) => setMergeKey(e.target.value)} className="block w-full p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500">{potentialMergeKeys.map(key => <option key={key} value={key}>{key}</option>)}</select></div>}
+                                {mergedData.length > 0 && <CollapsibleSection title="Merged Raw Data Preview" isOpen={isRawMergedDataOpen} toggleOpen={() => setIsRawMergedDataOpen(!isRawMergedDataOpen)} badgeCount={mergedData.length} icon="file-text"><button onClick={() => exportRawDataToCsv(mergedData, 'merged_raw_data.csv')} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg mb-4 transition-all duration-300 flex items-center gap-2"><Icon name="download" className="w-4 h-4"/>Export Full Raw Data</button>{renderDataTable(formattedMergedData, 'blue', 'merged-raw', mergedData.length)}</CollapsibleSection>}
+                                {mergedData.length > 0 && <div className="mb-8 p-6 bg-white/70 backdrop-blur-sm rounded-xl shadow-md border border-gray-200/50"><h2 className="text-xl font-bold text-gray-800 mb-4">Configure Cost Analysis Pivot Table</h2><div className="grid grid-cols-1 md:grid-cols-3 gap-6"><MultiSelectCheckboxes options={['KTH Hana Code', 'Zone', 'Store Name'].filter(opt => columns.includes(opt))} selectedValues={pivotRowFields} onValueChange={setPivotRowFields} searchTerm={rowFieldSearchTerm} onSearchChange={(e) => setRowFieldSearchTerm(e.target.value)} label="Row Fields" /> {pivotRowFields.length === 1 && costRowFilterValues.length > 0 ? (<MultiSelectCheckboxes options={costRowFilterValues} selectedValues={selectedCostRowFilterValues} onValueChange={setSelectedCostRowFilterValues} searchTerm={costRowFilterSearchTerm} onSearchChange={(e) => setCostRowFilterSearchTerm(e.target.value)} label={`Filter: ${pivotRowFields[0]}`} /> ) : (<div className="p-4 border-2 border-dashed rounded-lg bg-gray-50 flex items-center justify-center text-center h-full"><p className="text-sm text-gray-500">Select a single Row Field to enable filtering.</p></div>)} <MultiSelectCheckboxes options={columns.filter(c => c && c !== 'Budgeted Orders' && mergedData.some(row => typeof row[c] === 'number'))} selectedValues={pivotValueFields} onValueChange={setPivotValueFields} searchTerm={valueFieldSearchTerm} onSearchChange={(e) => setValueFieldSearchTerm(e.target.value)} label="Value Fields" /></div><div className="mt-6"><label htmlFor="aggregationType" className="block text-sm font-medium text-gray-700 mb-2">Aggregation:</label><select id="aggregationType" value={aggregationType} onChange={(e) => setAggregationType(e.target.value)} className="block w-full max-w-xs p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500"><option value="sum">Sum</option><option value="average">Average</option><option value="count">Count</option></select></div></div>}
+                                {pivotTable.rows.length > 0 ? <div className="p-6 bg-white/70 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50"><h2 className="text-2xl font-bold text-gray-800 mb-4">Cost Analysis Pivot Table</h2><div className="flex flex-wrap gap-3 mb-4"><button onClick={() => exportPivotDataToCsv(pivotTable, 'cost_analysis_pivot.csv')} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 flex items-center gap-2"><Icon name="download" className="w-4 h-4"/>Export Pivot</button><button onClick={fetchCostInsights} disabled={loadingCostInsights} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">{loadingCostInsights ? 'Generating...' : <><Icon name="sparkles" className="w-4 h-4"/>Get AI Insights</>}</button></div>{loadingCostInsights && <div className="flex items-center my-2"><div className="spinner"></div><p className="ml-3 text-blue-600">Generating AI insights...</p></div>}{errorCostInsights && <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded my-4" role="alert">{errorCostInsights}</div>}<CollapsibleSection title="LLM Cost Insights" isOpen={isCostInsightsOpen} toggleOpen={() => setIsCostInsightsOpen(!isCostInsightsOpen)} icon="message-square"><div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: costInsights.replace(/\n/g, '<br />') }} /></CollapsibleSection>{renderDataTable(pivotTable, 'green', 'cost-pivot', pivotTable.rows.length)}</div> : (mergedData.length > 0 && <div className="text-center p-8 bg-gray-100/50 rounded-xl border-2 border-dashed"><p className="text-lg font-medium text-gray-600">Please select at least one Row and one Value field to generate the pivot table.</p></div>)}
+                            </>}
+                            
+                            {currentPage === 'glDumpAnalysis' && <>
+                                <FileUploadCard title="Upload GL Dump CSV" onUpload={handleFileUpload} fileType="glDump" icon="upload-cloud" fileName={glDumpFileName} onClear={handleFileClear}/>
+                                {glDumpData.length > 0 && <CollapsibleSection title="GL Dump Raw Data (Preview)" isOpen={isRawGlDataOpen} toggleOpen={() => setIsRawGlDataOpen(!isRawGlDataOpen)} badgeCount={glDumpData.length} icon="file-text"><button onClick={() => exportRawDataToCsv(glDumpData, 'gl_dump_raw_data.csv')} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg mb-4 transition-all duration-300 flex items-center gap-2"><Icon name="download" className="w-4 h-4"/>Export Full Raw Data</button>{renderDataTable(formattedGlData, 'blue', 'gl-raw', glDumpData.length)}</CollapsibleSection>}
+                                {glDumpData.length > 0 && <div className="my-8 p-6 bg-white/70 backdrop-blur-sm rounded-xl shadow-md border border-gray-200/50"><h2 className="text-xl font-bold text-gray-800 mb-4">Configure GL Dump Pivot Table</h2><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"><MultiSelectCheckboxes options={glDumpColumns} selectedValues={glPivotRowFields} onValueChange={setGlPivotRowFields} searchTerm={glRowFieldSearchTerm} onSearchChange={(e) => setGlRowFieldSearchTerm(e.target.value)} label="Row Fields" /><MultiSelectCheckboxes options={glDumpColumns} selectedValues={glPivotColumnFields} onValueChange={setGlPivotColumnFields} searchTerm={glColumnFieldSearchTerm} onSearchChange={(e) => setGlColumnFieldSearchTerm(e.target.value)} label="Column Fields" />{glPivotColumnFields.length === 1 && glColumnFilterValues.length > 0 ? (<MultiSelectCheckboxes options={glColumnFilterValues} selectedValues={selectedGlColumnFilterValues} onValueChange={setSelectedGlColumnFilterValues} searchTerm={glColumnFilterSearchTerm} onSearchChange={(e) => setGlColumnFilterSearchTerm(e.target.value)} label={`Filter: ${glPivotColumnFields[0]}`} />) : (<div className="p-4 border-2 border-dashed rounded-lg bg-gray-50 flex items-center justify-center text-center h-full"><p className="text-sm text-gray-500">Select a single Column Field to enable filtering.</p></div>)}<MultiSelectCheckboxes options={glDumpColumns.filter(c => glDumpData.some(row => typeof row[c] === 'number'))} selectedValues={glPivotValueFields} onValueChange={setGlPivotValueFields} searchTerm={glValueFieldSearchTerm} onSearchChange={(e) => setGlValueFieldSearchTerm(e.target.value)} label="Value Fields" /></div><div className="mt-6"><label htmlFor="glAggregationType" className="block text-sm font-medium text-gray-700 mb-2">Aggregation:</label><select id="glAggregationType" value={glAggregationType} onChange={(e) => setGlAggregationType(e.target.value)} className="block w-full max-w-xs p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500"><option value="sum">Sum</option><option value="average">Average</option><option value="count">Count</option></select></div></div>}
+                                {glPivotTable.rows.length > 0 && <div className="p-6 bg-white/70 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50"><h2 className="text-2xl font-bold text-gray-800 mb-4">GL Dump Pivot Table</h2><button onClick={() => exportPivotDataToCsv(glPivotTable, 'gl_dump_pivot.csv')} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg mb-4 transition-all duration-300 flex items-center gap-2"><Icon name="download" className="w-4 h-4"/>Export Pivot</button>{renderDataTable(glPivotTable, 'green', 'gl-pivot', glPivotTable.rows.length)}</div>}
+                            </>}
+                            
+                            {currentPage === 'mergedView' && <>
+                                <div className="p-6 bg-white/70 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50">
+                                    <h2 className="text-2xl font-bold text-gray-800 mb-4">Merged Pivot Table View</h2>
+                                    {mergedViewTable.message ? (<div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 rounded-r-lg" role="alert"><p className="font-bold">Action Required</p><p>{mergedViewTable.message}</p><p className="text-sm mt-2">For a meaningful merge, please ensure the <strong className="font-semibold">Row Fields</strong> are configured identically on both the Cost Analysis and GL Dump tabs.</p></div>) : (<>
+                                        <p className="text-sm text-gray-600 mb-4">This table merges the pivots from the Cost Analysis and GL Dump tabs. Ensure Row Fields are configured identically for a meaningful comparison.</p>
+                                        <button onClick={() => exportPivotDataToCsv(mergedViewTable, 'full_merged_pivot.csv')} className="bg-teal-500 hover:bg-teal-600 text-white font-bold py-2 px-4 rounded-lg mb-4 transition-all duration-300 flex items-center gap-2"><Icon name="download" className="w-4 h-4"/>Export Merged View</button>
+                                        {renderDataTable(mergedViewTable, 'teal', 'merged-view', mergedViewTable.rows.length)}
+                                    </>)}
+                                </div>
+                            </>}
+
+                            {currentPage === 'reconciliation' && <>
+                                <div className="p-6 bg-white/70 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50">
+                                    <h2 className="text-2xl font-bold text-gray-800 mb-4">Cost vs. GL Reconciliation</h2>
+                                    {costCenterColumn && (
+                                    <div className="mb-6 p-4 bg-gray-50 rounded-lg border">
+                                        <h3 className="text-lg font-semibold text-gray-700 mb-2">Filter by {costCenterColumn}</h3>
+                                        <MultiSelectCheckboxes
+                                            options={reconciliationCostCenters}
+                                            selectedValues={selectedCostCenters}
+                                            onValueChange={setSelectedCostCenters}
+                                            searchTerm={costCenterSearchTerm}
+                                            onSearchChange={(e) => setCostCenterSearchTerm(e.target.value)}
+                                            label={`Values for ${costCenterColumn}`}
+                                        />
+                                    </div>
+                                    )}
+                                    {reconciliationTable.message ? (<div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 rounded-r-lg" role="alert"><p className="font-bold">Data Required</p><p>{reconciliationTable.message}</p></div>) : (<>
+                                        <p className="text-sm text-gray-600 mb-4">This table directly compares total amounts for each cost category from the Cost Analysis and GL Dump files. Differences are highlighted in red.</p>
+                                        <button onClick={() => exportPivotDataToCsv(reconciliationTable, 'reconciliation_report.csv')} className="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-lg mb-4 transition-all duration-300 flex items-center gap-2"><Icon name="download" className="w-4 h-4"/>Export Reconciliation</button>
+                                        {renderDataTable(reconciliationTable, 'orange', 'reconciliation', reconciliationTable.rows.length)}
+                                    </>)}
+                                </div>
+                            </>}
+                        </main>
+                    </div>
+                </div>
+            );
+        };
+
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
