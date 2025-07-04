@@ -78,7 +78,7 @@
         }
 
         .welcome-screen {
-            animation: fadeOut 1s ease-out 14s forwards;
+            animation: fadeOut 1s ease-out 6s forwards;
         }
 
         @keyframes fadeOut {
@@ -92,7 +92,7 @@
         }
 
         .progress-bar {
-            animation: progressBar 15s linear forwards;
+            animation: progressBar 7s linear forwards;
         }
 
         @keyframes row-in {
@@ -262,6 +262,7 @@
                             <div className="bg-white h-2.5 rounded-full progress-bar"></div>
                         </div>
                     </div>
+                    <p className="absolute bottom-10 text-white/50 text-sm fade-in" style={{animationDelay: '2s'}}>Design by Aviinash</p>
                 </div>
             );
         };
@@ -332,7 +333,7 @@
             useEffect(() => {
                 const timer = setTimeout(() => {
                     setShowWelcome(false);
-                }, 15000);
+                }, 7000);
 
                 return () => clearTimeout(timer);
             }, []);
@@ -936,6 +937,9 @@
                                 </div>
                             </>}
                         </main>
+                        <footer className="text-center mt-8 text-sm text-gray-500">
+                            <p>Design by Aviinash</p>
+                        </footer>
                     </div>
                 </div>
             );
