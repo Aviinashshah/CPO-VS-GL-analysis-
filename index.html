@@ -334,7 +334,6 @@
                 const timer = setTimeout(() => {
                     setShowWelcome(false);
                 }, 7000);
-
                 return () => clearTimeout(timer);
             }, []);
 
@@ -525,6 +524,7 @@
                             if (glAccountKey === '600060') {
                                 if (docHeaderText.includes('FT_SALARY')) { newRow['G/L Account'] = 'Monthly CDO incentive'; }
                                 else if (docHeaderText.includes('ADVANCE INCENTIV')) { newRow['G/L Account'] = 'Fuel - All Rounder, FT rider, PT rider, PT Non rider'; }
+                                else if (textColumn.includes('FUEL')) { newRow['G/L Account'] = 'Fuel - All Rounder, FT rider, PT rider, PT Non rider'; }
                                 else { newRow['G/L Account'] = 'Others'; }
                             } 
                             else if (glAccountKey === '611000') {
