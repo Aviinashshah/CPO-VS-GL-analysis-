@@ -128,6 +128,7 @@
         const columnRenamingMap = {
             'FT Staff Room': 'Staff room rent', 'FT Non Rider Salary': 'FT salaries', 'PF ESIC': 'PF ESIC & LWF', 'NAPS': 'NAPS', 'Monthly PT Non Rider': 'Part timer non rider', 'F&F Cost': 'FnF cost', 'F&F PF +ESIC': 'PF ESIC & LWF', 'Vendor Payment': 'Vendor Payment', 'FT Rider Salary': 'FT salaries', 'PF+ESIC': 'PF ESIC & LWF', 'Monthly PT Rider': 'Part timer', 'Weekly Freelancer': 'Freelancer', 'Outsourced Delivery': 'Outsourced', 'Outsourced\u00A0Delivery': 'Outsourced', '18% GST on OS': 'Outsourced', 'OS': 'Outsourced', 'FT Comapny Bike Petrol': 'Petrol', 'DD Incentive All Rounder': 'DD incentive - All rounder, PT, Rider', 'DD Incentive Rider': 'DD incentive - All rounder, PT, Rider', 'ALLROUNDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'FT RIDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'PT NON RIDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'PT RIDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'Special Incentive': 'Special Incentive', 'Notice Pay Recovery': 'Notice Pay Recovery', 'Other Deduction Salary': 'Other Deduction Salary'
         };
+        
         const glAccountRenamingMap = {
             622010: 'Staff room rent', 600000: 'FT salaries', 601005: 'PF ESIC & LWF', 601010: 'PF ESIC & LWF', 601030: 'PF ESIC & LWF', 600035: 'NAPS', 600075: 'Part timer non rider', 600055: 'FnF cost', 600070: 'Freelancer', 611000: 'Outsourced', 600040: 'DD incentive - All rounder, PT, Rider', 600060: 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 600050: 'Notice Pay Recovery', 600080: 'Other Deduction Salary'
         };
@@ -137,7 +138,17 @@
                 const newRow = {};
                 for (const originalKey in row) {
                     if (row.hasOwnProperty(originalKey)) {
-                        const newKey = columnRenamingMap[originalKey.trim()] || originalKey.trim();
+                        const trimmedKey = originalKey.trim();
+                        let newKey;
+
+                        // Apply robust normalization ONLY for "Weekly Freelancer"
+                        if (trimmedKey.toLowerCase().replace(/\s+/g, ' ') === 'weekly freelancer') {
+                            newKey = 'Freelancer';
+                        } else {
+                            // Use the standard, exact-match mapping for all other columns
+                            newKey = columnRenamingMap[trimmedKey] || trimmedKey;
+                        }
+
                         if (newRow.hasOwnProperty(newKey) && typeof row[originalKey] === 'number') {
                             newRow[newKey] += row[originalKey];
                         } else {
@@ -253,7 +264,7 @@
                             <Icon name="activity" className="w-24 h-24 mx-auto text-white/80"/>
                         </div>
                         <h1 className="text-5xl md:text-7xl font-extrabold mt-6 fade-in" style={{animationDelay: '1s'}}>
-                           Financial Analysis Suite
+                            Financial Analysis Suite
                         </h1>
                         <p className="text-xl md:text-2xl mt-4 text-white/80 fade-in" style={{animationDelay: '1.5s'}}>
                             Your data, simplified and reconciled.
@@ -275,7 +286,7 @@
                     transform: 'rotate(-45deg)'
                 }}></div>
                  <div className="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none">
-                     <p className="text-9xl font-extrabold text-gray-900 -rotate-45">CONFIDENTIAL</p>
+                      <p className="text-9xl font-extrabold text-gray-900 -rotate-45">CONFIDENTIAL</p>
                  </div>
             </div>
         );
@@ -581,7 +592,7 @@
                     setLoading(false);
                 }
             };
-             
+                
             const handleFileClear = (type) => {
                 if (type === 'fixed') {
                     setFixedCostData([]);
@@ -752,13 +763,52 @@
 
             const generateLlmContent = async (prompt) => {
                 const apiKey = API_KEY;
-                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-                const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
-                const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                if (!response.ok) { const errorData = await response.json(); throw new Error(`API Error: ${errorData.error?.message || response.statusText}`); }
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+                
+                let chatHistory = [];
+                chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                const payload = { contents: chatHistory };
+
+                let response;
+                let retries = 3;
+                let delay = 1000; // start with 1 second
+
+                for (let i = 0; i < retries; i++) {
+                    try {
+                        response = await fetch(apiUrl, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+                        if (response.ok) {
+                            break; // if response is successful, exit the loop
+                        }
+                        // if response is not ok, but not a network error, it will be handled after the loop
+                    } catch (error) {
+                       // This catches network errors, etc. We'll retry after a delay.
+                    }
+                    
+                    if (i < retries - 1) { // Don't wait after the last try
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        delay *= 2; // Double the delay for the next retry
+                    }
+                }
+
+                if (!response || !response.ok) {
+                    const errorData = await response?.json().catch(() => null); // Try to parse error, but don't fail if it's not JSON
+                    throw new Error(`API Error: ${errorData?.error?.message || response?.statusText || 'A network error occurred after multiple retries.'}`);
+                }
+
                 const result = await response.json();
-                if (result.candidates?.[0]?.content?.parts?.[0]?.text) { return result.candidates[0].content.parts[0].text; }
-                throw new Error(result.promptFeedback?.blockReason ? `Blocked: ${result.promptFeedback.blockReason}` : "Invalid API response.");
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0 && result.candidates[0].content.parts[0].text) {
+                    return result.candidates[0].content.parts[0].text;
+                } else {
+                    // Handle cases where the response structure is unexpected or content is missing
+                    throw new Error(result.promptFeedback?.blockReason ? `Content blocked: ${result.promptFeedback.blockReason}` : "Invalid or empty API response received.");
+                }
             };
             
             const fetchCostInsights = async () => {
