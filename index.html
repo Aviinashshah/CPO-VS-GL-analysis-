@@ -251,8 +251,8 @@
 
         const LoadingOverlay = ({ message }) => (
              <div className="fixed inset-0 bg-white bg-opacity-75 flex flex-col items-center justify-center z-50 backdrop-blur-sm">
-                <div className="spinner"></div>
-                <p className="mt-4 text-lg font-semibold text-gray-700">{message}</p>
+                 <div className="spinner"></div>
+                 <p className="mt-4 text-lg font-semibold text-gray-700">{message}</p>
             </div>
         );
         
@@ -280,14 +280,14 @@
         
         const Watermark = () => (
              <div className="fixed inset-0 pointer-events-none z-40">
-                <div className="absolute inset-0 opacity-10" style={{
-                    backgroundImage: 'repeating-conic-gradient(rgba(0,0,0,0.4) 0% 25%, transparent 0% 50%)',
-                    backgroundSize: '60px 60px',
-                    transform: 'rotate(-45deg)'
-                }}></div>
-                 <div className="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none">
-                      <p className="text-9xl font-extrabold text-gray-900 -rotate-45">CONFIDENTIAL</p>
-                 </div>
+                 <div className="absolute inset-0 opacity-10" style={{
+                     backgroundImage: 'repeating-conic-gradient(rgba(0,0,0,0.4) 0% 25%, transparent 0% 50%)',
+                     backgroundSize: '60px 60px',
+                     transform: 'rotate(-45deg)'
+                 }}></div>
+                  <div className="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none">
+                       <p className="text-9xl font-extrabold text-gray-900 -rotate-45">CONFIDENTIAL</p>
+                  </div>
             </div>
         );
 
@@ -525,7 +525,24 @@
                     } else if (type === 'fixed') {
                         setFixedCostData(cleanedData);
                     } else if (type === 'glDump') {
-                        const processedGlData = cleanedData.map(row => {
+                        // Find the Cost Center column from the headers of the uploaded GL data.
+                        let costCenterColName = null;
+                        if (cleanedData.length > 0) {
+                            const headers = Object.keys(cleanedData[0]);
+                            // Find a column that looks like a "Cost Center" column.
+                            costCenterColName = headers.find(h => h.toLowerCase().trim().includes('cost center') || h.toLowerCase().trim().includes('cost ctr'));
+                        }
+
+                        // Filter the data to only include rows where the cost center starts with "KTH".
+                        const filteredByCostCenter = costCenterColName
+                            ? cleanedData.filter(row => {
+                                const costCenterValue = row[costCenterColName];
+                                // Check if the value is a string and starts with 'KTH' (case-insensitive).
+                                return typeof costCenterValue === 'string' && costCenterValue.trim().toUpperCase().startsWith('KTH');
+                              })
+                            : cleanedData; // If no cost center column is found, don't filter.
+
+                        const processedGlData = filteredByCostCenter.map(row => {
                             const newRow = { ...row };
                             const glAccountKey = String(newRow['G/L Account']);
                             const docHeaderText = String(newRow['Document Header Text'] || '').toUpperCase();
@@ -592,7 +609,7 @@
                     setLoading(false);
                 }
             };
-                
+            
             const handleFileClear = (type) => {
                 if (type === 'fixed') {
                     setFixedCostData([]);
