@@ -126,14 +126,14 @@
 
         // --- DATA MAPPING CONFIGURATION ---
         const columnRenamingMap = {
-            'FT Staff Room': 'Staff room rent', 'FT Non Rider Salary': 'FT salaries', 'PF ESIC': 'PF ESIC & LWF', 'NAPS': 'NAPS', 'Monthly PT Non Rider': 'Part timer non rider', 'F&F Cost': 'FnF cost', 'F&F PF +ESIC': 'PF ESIC & LWF', 'Vendor Payment': 'Vendor Payment', 'FT Rider Salary': 'FT salaries', 'PF+ESIC': 'PF ESIC & LWF', 'Monthly PT Rider': 'Part timer', 'Weekly Freelancer': 'Freelancer', 'Outsourced Delivery': 'Outsourced', 'Outsourced\u00A0Delivery': 'Outsourced', '18% GST on OS': 'Outsourced', 'OS': 'Outsourced', 'FT Comapny Bike Petrol': 'Petrol', 'DD Incentive All Rounder': 'DD incentive - All rounder, PT, Rider', 'DD Incentive Rider': 'DD incentive - All rounder, PT, Rider', 'ALLROUNDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'FT RIDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'PT NON RIDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'PT RIDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'Special Incentive': 'Special Incentive', 'Notice Pay Recovery': 'Notice Pay Recovery', 'Other Deduction Salary': 'Other Deduction Salary'
+            'FT Staff Room': 'Staff room rent', 'FT Non Rider Salary': 'FT salaries', 'PF ESIC': 'PF ESIC & LWF', 'NAPS': 'NAPS', 'Monthly PT Non Rider': 'Part timer non rider', 'F&F Cost': 'FnF cost', 'F&F PF +ESIC': 'PF ESIC & LWF', 'Vendor Payment': 'Vendor Payment', 'FT Rider Salary': 'FT salaries', 'PF+ESIC': 'PF ESIC & LWF', 'Monthly PT Rider': 'Part timer', 'Weekly Freelancer': 'Freelancer', 'Outsourced Delivery': 'Outsourced', 'Outsourced Delivery': 'Outsourced', '18% GST on OS': 'Outsourced', 'OS': 'Outsourced', 'FT Comapny Bike Petrol': 'Petrol', 'DD Incentive All Rounder': 'DD incentive - All rounder, PT, Rider', 'DD Incentive Rider': 'DD incentive - All rounder, PT, Rider', 'ALLROUNDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'FT RIDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'PT NON RIDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'PT RIDER FUEL': 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 'Special Incentive': 'Special Incentive', 'Notice Pay Recovery': 'Notice Pay Recovery', 'Other Deduction Salary': 'Other Deduction Salary'
         };
         
         const glAccountRenamingMap = {
             622010: 'Staff room rent', 600000: 'FT salaries', 601005: 'PF ESIC & LWF', 601010: 'PF ESIC & LWF', 601030: 'PF ESIC & LWF', 600035: 'NAPS', 600075: 'Part timer non rider', 600055: 'FnF cost', 600070: 'Freelancer', 611000: 'Outsourced', 600040: 'DD incentive - All rounder, PT, Rider', 600060: 'Fuel - All Rounder, FT rider, PT rider, PT Non rider', 600050: 'Notice Pay Recovery', 600080: 'Other Deduction Salary'
         };
 
-        const processRawData = (rawData) => {
+        const processFixedData = (rawData) => {
             return rawData.map(row => {
                 const newRow = {};
                 for (const originalKey in row) {
@@ -148,6 +148,35 @@
                             // Use the standard, exact-match mapping for all other columns
                             newKey = columnRenamingMap[trimmedKey] || trimmedKey;
                         }
+
+                        if (newRow.hasOwnProperty(newKey) && typeof row[originalKey] === 'number') {
+                            newRow[newKey] += row[originalKey];
+                        } else {
+                            newRow[newKey] = row[originalKey];
+                        }
+                    }
+                }
+                return newRow;
+            });
+        };
+        
+        const processVariableData = (rawData) => {
+            // Create a normalized renaming map once for efficiency
+            const normalizedRenamingMap = new Map();
+            for (const key in columnRenamingMap) {
+                if (Object.prototype.hasOwnProperty.call(columnRenamingMap, key)) {
+                    const normalizedKey = key.trim().toLowerCase().replace(/\s+/g, ' ');
+                    normalizedRenamingMap.set(normalizedKey, columnRenamingMap[key]);
+                }
+            }
+
+            return rawData.map(row => {
+                const newRow = {};
+                for (const originalKey in row) {
+                    if (row.hasOwnProperty(originalKey)) {
+                        const trimmedKey = originalKey.trim();
+                        const normalizedKey = trimmedKey.toLowerCase().replace(/\s+/g, ' ');
+                        const newKey = normalizedRenamingMap.get(normalizedKey) || trimmedKey;
 
                         if (newRow.hasOwnProperty(newKey) && typeof row[originalKey] === 'number') {
                             newRow[newKey] += row[originalKey];
@@ -184,10 +213,10 @@
             return (
                 <div className="w-full">
                     <div className="flex justify-between items-center mb-1">
-                         <label className="block text-sm font-medium text-gray-500">{label}</label>
-                         <button onClick={handleSelectAll} className="text-xs font-semibold text-blue-600 hover:text-blue-800">
-                             {selectedValues.length === options.length ? 'Deselect All' : 'Select All'}
-                         </button>
+                           <label className="block text-sm font-medium text-gray-500">{label}</label>
+                           <button onClick={handleSelectAll} className="text-xs font-semibold text-blue-600 hover:text-blue-800">
+                                {selectedValues.length === options.length ? 'Deselect All' : 'Select All'}
+                           </button>
                     </div>
                     <input
                         type="text"
@@ -269,9 +298,9 @@
                         <p className="text-xl md:text-2xl mt-4 text-white/80 fade-in" style={{animationDelay: '1.5s'}}>
                             Your data, simplified and reconciled.
                         </p>
-                         <div className="w-1/2 mx-auto mt-8 bg-white/20 rounded-full h-2.5">
-                            <div className="bg-white h-2.5 rounded-full progress-bar"></div>
-                        </div>
+                           <div className="w-1/2 mx-auto mt-8 bg-white/20 rounded-full h-2.5">
+                               <div className="bg-white h-2.5 rounded-full progress-bar"></div>
+                           </div>
                     </div>
                     <p className="absolute bottom-10 text-white/50 text-sm fade-in" style={{animationDelay: '2s'}}>Design by Aviinash™</p>
                 </div>
@@ -286,7 +315,7 @@
                      transform: 'rotate(-45deg)'
                  }}></div>
                   <div className="absolute inset-0 flex items-center justify-center opacity-20 pointer-events-none">
-                       <p className="text-9xl font-extrabold text-gray-900 -rotate-45">CONFIDENTIAL</p>
+                        <p className="text-9xl font-extrabold text-gray-900 -rotate-45">CONFIDENTIAL</p>
                   </div>
             </div>
         );
@@ -366,8 +395,8 @@
                 if (fixedCostData.length > 0 && variableCostData.length > 0 && mergeKey) {
                     setError('');
                     
-                    const processedFixedData = processRawData(fixedCostData);
-                    const processedVariableData = processRawData(variableCostData);
+                    const processedFixedData = processFixedData(fixedCostData);
+                    const processedVariableData = processVariableData(variableCostData);
 
                     const mergedMap = new Map();
                     
@@ -507,23 +536,23 @@
                     });
                     
                     if (type === 'variable') {
-                        const processedVariableData = cleanedData.map(row => {
-                            const newRow = { ...row };
-                            const outsourcedDelivery = newRow['Outsourced Delivery'] || 0;
-                            const gst = newRow['18% GST on OS'] || 0;
-                            const os = newRow['OS'] || 0;
+                        const processedVariableData = processVariableData(cleanedData.map(row => {
+                             const newRow = { ...row };
+                             const outsourcedDelivery = newRow['Outsourced Delivery'] || 0;
+                             const gst = newRow['18% GST on OS'] || 0;
+                             const os = newRow['OS'] || 0;
                             
-                            newRow['Outsourced'] = (newRow['Outsourced'] || 0) + outsourcedDelivery + gst + os;
+                             newRow['Outsourced'] = (newRow['Outsourced'] || 0) + outsourcedDelivery + gst + os;
                             
-                            delete newRow['Outsourced Delivery'];
-                            delete newRow['18% GST on OS'];
-                            delete newRow['OS'];
+                             delete newRow['Outsourced Delivery'];
+                             delete newRow['18% GST on OS'];
+                             delete newRow['OS'];
                             
-                            return newRow;
-                        });
+                             return newRow;
+                        }));
                         setVariableCostData(processedVariableData);
                     } else if (type === 'fixed') {
-                        setFixedCostData(cleanedData);
+                        setFixedCostData(processFixedData(cleanedData));
                     } else if (type === 'glDump') {
                         // Find the Cost Center column from the headers of the uploaded GL data.
                         let costCenterColName = null;
@@ -909,14 +938,14 @@
                         </label>
                         {fileName ? (
                            <div className="flex items-center gap-2 bg-gray-100 p-2 rounded-md">
-                               <Icon name="file-text" className="w-4 h-4 text-gray-500" />
-                               <span className="text-sm text-gray-700 truncate max-w-xs">{fileName}</span>
-                               <button onClick={() => onClear(fileType)} className="text-gray-400 hover:text-red-500 flex-shrink-0">
-                                   <Icon name="x" className="w-4 h-4"/>
-                               </button>
+                                <Icon name="file-text" className="w-4 h-4 text-gray-500" />
+                                <span className="text-sm text-gray-700 truncate max-w-xs">{fileName}</span>
+                                <button onClick={() => onClear(fileType)} className="text-gray-400 hover:text-red-500 flex-shrink-0">
+                                    <Icon name="x" className="w-4 h-4"/>
+                                </button>
                            </div>
                         ) : (
-                           <span className="text-sm text-gray-500">No file chosen</span>
+                            <span className="text-sm text-gray-500">No file chosen</span>
                         )}
                     </div>
                      <p className="text-xs text-gray-400 mt-2">Supported formats: .csv, .xls, .xlsx</p>
@@ -965,7 +994,7 @@
                             {currentPage === 'glDumpAnalysis' && <>
                                 <FileUploadCard title="Upload GL Dump CSV" onUpload={handleFileUpload} fileType="glDump" icon="upload-cloud" fileName={glDumpFileName} onClear={handleFileClear}/>
                                 {glDumpData.length > 0 && <CollapsibleSection title="GL Dump Raw Data (Preview)" isOpen={isRawGlDataOpen} toggleOpen={() => setIsRawGlDataOpen(!isRawGlDataOpen)} badgeCount={glDumpData.length} icon="file-text"><button onClick={() => exportRawDataToCsv(glDumpData, 'gl_dump_raw_data.csv')} className="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg mb-4 transition-all duration-300 flex items-center gap-2"><Icon name="download" className="w-4 h-4"/>Export Full Raw Data</button>{renderDataTable(formattedGlData, 'blue', 'gl-raw', glDumpData.length)}</CollapsibleSection>}
-                                {glDumpData.length > 0 && <div className="my-8 p-6 bg-white/70 backdrop-blur-sm rounded-xl shadow-md border border-gray-200/50"><h2 className="text-xl font-bold text-gray-800 mb-4">Configure GL Dump Pivot Table</h2><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"><MultiSelectCheckboxes options={glDumpColumns} selectedValues={glPivotRowFields} onValueChange={setGlPivotRowFields} searchTerm={glRowFieldSearchTerm} onSearchChange={(e) => setGlRowFieldSearchTerm(e.target.value)} label="Row Fields" /><MultiSelectCheckboxes options={glDumpColumns} selectedValues={glPivotColumnFields} onValueChange={setGlPivotColumnFields} searchTerm={glColumnFieldSearchTerm} onSearchChange={(e) => setGlColumnFieldSearchTerm(e.target.value)} label="Column Fields" />{glPivotColumnFields.length === 1 && glColumnFilterValues.length > 0 ? (<MultiSelectCheckboxes options={glColumnFilterValues} selectedValues={selectedGlColumnFilterValues} onValueChange={setSelectedGlColumnFilterValues} searchTerm={glColumnFilterSearchTerm} onSearchChange={(e) => setGlColumnFilterSearchTerm(e.target.value)} label={`Filter: ${glPivotColumnFields[0]}`} />) : (<div className="p-4 border-2 border-dashed rounded-lg bg-gray-50 flex items-center justify-center text-center h-full"><p className="text-sm text-gray-500">Select a single Column Field to enable filtering.</p></div>)}<MultiSelectCheckboxes options={glDumpColumns.filter(c => glDumpData.some(row => typeof row[c] === 'number'))} selectedValues={glPivotValueFields} onValueChange={setGlPivotValueFields} searchTerm={glValueFieldSearchTerm} onSearchChange={(e) => setGlValueFieldSearchTerm(e.target.value)} label="Value Fields" /></div><div className="mt-6"><label htmlFor="glAggregationType" className="block text-sm font-medium text-gray-700 mb-2">Aggregation:</label><select id="glAggregationType" value={glAggregationType} onChange={(e) => setGlAggregationType(e.target.value)} className="block w-full max-w-xs p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500"><option value="sum">Sum</option><option value="average">Average</option><option value="count">Count</option></select></div></div>}
+                                {glDumpData.length > 0 && <div className="my-8 p-6 bg-white/70 backdrop-blur-sm rounded-xl shadow-md border border-gray-200/50"><h2 className="text-xl font-bold text-gray-800 mb-4">Configure GL Dump Pivot Table</h2><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"><MultiSelectCheckboxes options={glDumpColumns} selectedValues={glPivotRowFields} onValueChange={setGlPivotRowFields} searchTerm={glRowFieldSearchTerm} onSearchChange={(e) => setGlRowFieldSearchTerm(e.target.value)} label="Row Fields" /><MultiSelectCheckboxes options={glDumpColumns} selectedValues={glPivotColumnFields} onValueChange={setGlPivotColumnFields} searchTerm={glColumnFieldSearchTerm} onSearchChange={(e) => setGlColumnFieldSearchTerm(e.target.value)} label="Column Fields" />{glPivotColumnFields.length === 1 && glColumnFilterValues.length > 0 ? (<MultiSelectCheckboxes options={glColumnFilterValues} selectedValues={selectedGlColumnFilterValues} onValueChange={setSelectedGlColumnFilterValues} searchTerm={glColumnFilterSearchTerm} onSearchChange={(e) => setGlColumnFilterSearchTerm(e.target.value)} label={`Filter: ${glPivotColumnFields[0]}`} />) : (<div className="p-4 border-2 border-dashed rounded-lg bg-gray-50 flex items-center justify-center text-center h-full"><p className="text-sm text-gray-500">Select a single Column Field to enable filtering.</p></div>)}<MultiSelectCheckboxes options={glDumpColumns.filter(c => glDumpData.some(row => typeof row[c] === 'number'))} selectedValues={glPivotValueFields} onValueChange={setGlPivotValueFields} searchTerm={glValueFieldSearchTerm} onSearchChange={(e) => setValueFieldSearchTerm(e.target.value)} label="Value Fields" /></div><div className="mt-6"><label htmlFor="glAggregationType" className="block text-sm font-medium text-gray-700 mb-2">Aggregation:</label><select id="glAggregationType" value={glAggregationType} onChange={(e) => setGlAggregationType(e.target.value)} className="block w-full max-w-xs p-2 border border-gray-300 rounded-lg shadow-sm focus:ring-2 focus:ring-blue-500"><option value="sum">Sum</option><option value="average">Average</option><option value="count">Count</option></select></div></div>}
                                 {glPivotTable.rows.length > 0 && <div className="p-6 bg-white/70 backdrop-blur-sm rounded-xl shadow-lg border border-gray-200/50"><h2 className="text-2xl font-bold text-gray-800 mb-4">GL Dump Pivot Table</h2><button onClick={() => exportPivotDataToCsv(glPivotTable, 'gl_dump_pivot.csv')} className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg mb-4 transition-all duration-300 flex items-center gap-2"><Icon name="download" className="w-4 h-4"/>Export Pivot</button>{renderDataTable(glPivotTable, 'green', 'gl-pivot', glPivotTable.rows.length)}</div>}
                             </>}
                             
